@@ -8,9 +8,19 @@ import { spiceAgentProfile } from './agents/spiceAgent';
 import { signalsAgentProfile } from './agents/signalsAgent';
 import { datasheetAgentProfile } from './agents/datasheetAgent';
 import { AgentLogger } from './logging';
-import { appendTextFile, readTextFile, replaceInFile, writeTextFile } from './actions/fileActions';
+import {
+    appendTextFile,
+    readTextFile,
+    replaceInFile,
+    simulateAppendTextFile,
+    simulateReplaceInFile,
+    simulateWriteTextFile,
+    SimulatedMutationResult,
+    writeTextFile
+} from './actions/fileActions';
 import { listProjectFiles } from './actions/projectActions';
 import { searchInWorkspace } from './actions/searchActions';
+import { applySingleProviderPolicy, ModelCandidate } from './modelPolicy';
 
 export interface AgentReply {
     text: string;
@@ -19,15 +29,10 @@ export interface AgentReply {
     model?: string;
     domain?: AgentDomain;
     iterations?: number;
+    dryRun?: boolean;
 }
 
 type AgentTaskType = 'analysis' | 'coding';
-
-interface ModelCandidate {
-    provider: LlmProvider;
-    model: string;
-}
-
 interface PlannedAction {
     type: 'read_file' | 'write_file' | 'append_file' | 'search' | 'replace' | 'list_files' | 'none';
     args?: Record<string, unknown>;
@@ -69,6 +74,41 @@ export class Agent {
 
     private getMaxIterations(): number {
         return vscode.workspace.getConfiguration('kimi').get<number>('agent.maxIterations', 4);
+    }
+
+    private getSingleProviderStrict(): boolean {
+        return vscode.workspace.getConfiguration('kimi').get<boolean>('security.singleProviderStrict', true);
+    }
+
+    private getConfiguredProvider(): LlmProvider {
+        const configured = vscode.workspace.getConfiguration('kimi').get<string>('provider', 'moonshot');
+        if (configured === 'openrouter' || configured === 'moonshot') {
+            return configured;
+        }
+
+        this.logger.warn(`Provider configure invalide: ${String(configured)}. Fallback sur moonshot.`);
+        return 'moonshot';
+    }
+
+    private getDryRunEnabled(): boolean {
+        const config = vscode.workspace.getConfiguration('kimi');
+        const explicitDryRun = config.get<boolean>('agent.dryRun');
+        if (explicitDryRun !== undefined) {
+            return explicitDryRun;
+        }
+
+        const legacyPreview = config.get<boolean>('agent.dryRunPreview');
+        if (legacyPreview !== undefined) {
+            this.logger.warn('Configuration legacy kimi.agent.dryRunPreview detectee. Utilisez kimi.agent.dryRun.');
+            return legacyPreview;
+        }
+
+        return true;
+    }
+
+    private logSimulation(result: SimulatedMutationResult): void {
+        this.logger.action('dry-run', `${result.action} ${result.path} | ${result.diffSummary}`);
+        this.logger.decision('dry-run-diff', result.diffLog);
     }
 
     private detectTaskType(message: string): AgentTaskType {
@@ -310,7 +350,11 @@ export class Agent {
         return value.trim();
     }
 
-    private async executeAction(action: PlannedAction, allowedActions: SpecialistProfile['allowedActions']): Promise<string> {
+    private async executeAction(
+        action: PlannedAction,
+        allowedActions: SpecialistProfile['allowedActions'],
+        dryRunEnabled: boolean
+    ): Promise<string> {
         if (!allowedActions.includes(action.type)) {
             throw new Error(`Action non autorisee pour ce sous-agent: ${action.type}`);
         }
@@ -326,12 +370,26 @@ export class Agent {
             case 'write_file': {
                 const path = this.getRequiredStringArg(args, 'path');
                 const content = this.getRequiredStringArg(args, 'content');
+
+                if (dryRunEnabled) {
+                    const simulation = await simulateWriteTextFile(path, content);
+                    this.logSimulation(simulation);
+                    return this.stringifyResult(simulation);
+                }
+
                 const result = await writeTextFile(path, content);
                 return this.stringifyResult(result);
             }
             case 'append_file': {
                 const path = this.getRequiredStringArg(args, 'path');
                 const content = this.getRequiredStringArg(args, 'content');
+
+                if (dryRunEnabled) {
+                    const simulation = await simulateAppendTextFile(path, content);
+                    this.logSimulation(simulation);
+                    return this.stringifyResult(simulation);
+                }
+
                 const result = await appendTextFile(path, content);
                 return this.stringifyResult(result);
             }
@@ -339,6 +397,13 @@ export class Agent {
                 const path = this.getRequiredStringArg(args, 'path');
                 const search = this.getRequiredStringArg(args, 'search');
                 const replacement = this.getRequiredStringArg(args, 'replacement');
+
+                if (dryRunEnabled) {
+                    const simulation = await simulateReplaceInFile(path, search, replacement);
+                    this.logSimulation(simulation);
+                    return this.stringifyResult(simulation);
+                }
+
                 const result = await replaceInFile(path, search, replacement);
                 return this.stringifyResult(result);
             }
@@ -368,11 +433,40 @@ export class Agent {
         const taskType = this.detectTaskType(message);
         const profile = this.pickProfile(message);
         const stack = this.selectModelStack(taskType, profile.domain);
+        const singleProviderStrict = this.getSingleProviderStrict();
+        const configuredProvider = this.getConfiguredProvider();
+        const effectiveStack = applySingleProviderPolicy(stack, configuredProvider, singleProviderStrict);
+        const dryRunEnabled = this.getDryRunEnabled();
         const maxIterations = Math.max(1, this.getMaxIterations());
 
         this.logger.decision('task-type', taskType);
         this.logger.decision('specialist', `${profile.domain} (${profile.name})`);
+        this.logger.decision('single-provider-strict', String(singleProviderStrict));
+        this.logger.decision('configured-provider', configuredProvider);
+        this.logger.decision('dry-run', String(dryRunEnabled));
+        this.logger.decision('stack-size-before-filter', String(stack.length));
+        this.logger.decision('stack-size-after-filter', String(effectiveStack.length));
         this.logger.decision('iteration-limit', String(maxIterations));
+
+        if (effectiveStack.length === 0) {
+            const policyError = [
+                'Aucun modele disponible apres application de la politique single-provider strict.',
+                `provider=${configuredProvider}`,
+                `task=${taskType}`,
+                `domain=${profile.domain}`,
+                'Ajustez kimi.provider ou desactivez kimi.security.singleProviderStrict.'
+            ].join(' ');
+
+            this.logger.error(policyError);
+            return {
+                text: policyError,
+                error: policyError,
+                provider: configuredProvider,
+                domain: profile.domain,
+                iterations: 0,
+                dryRun: dryRunEnabled
+            };
+        }
 
         const messages: KimiMessage[] = [
             {
@@ -399,7 +493,7 @@ export class Agent {
         for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
             this.logger.info(`Iteration ${iteration}/${maxIterations}`);
 
-            const response = await this.requestWithStack(messages, stack);
+            const response = await this.requestWithStack(messages, effectiveStack);
             lastProvider = response.provider ?? lastProvider;
             lastModel = response.model ?? lastModel;
             lastText = response.text;
@@ -411,7 +505,8 @@ export class Agent {
                     provider: response.provider,
                     model: response.model,
                     domain: profile.domain,
-                    iterations: iteration
+                    iterations: iteration,
+                    dryRun: dryRunEnabled
                 };
             }
 
@@ -428,7 +523,8 @@ export class Agent {
                         provider: response.provider,
                         model: response.model,
                         domain: profile.domain,
-                        iterations: iteration
+                        iterations: iteration,
+                        dryRun: dryRunEnabled
                     };
                 }
 
@@ -450,7 +546,8 @@ export class Agent {
                     provider: response.provider,
                     model: response.model,
                     domain: profile.domain,
-                    iterations: iteration
+                    iterations: iteration,
+                    dryRun: dryRunEnabled
                 };
             }
 
@@ -463,13 +560,14 @@ export class Agent {
                     provider: response.provider,
                     model: response.model,
                     domain: profile.domain,
-                    iterations: iteration
+                    iterations: iteration,
+                    dryRun: dryRunEnabled
                 };
             }
 
             try {
                 this.logger.action(action.type, this.stringifyResult(action.args ?? {}));
-                const observation = await this.executeAction(action, profile.allowedActions);
+                const observation = await this.executeAction(action, profile.allowedActions, dryRunEnabled);
                 messages.push({ role: 'assistant', content: response.text });
                 messages.push({
                     role: 'user',
@@ -491,7 +589,8 @@ export class Agent {
             provider: lastProvider,
             model: lastModel,
             domain: profile.domain,
-            iterations: maxIterations
+            iterations: maxIterations,
+            dryRun: dryRunEnabled
         };
     }
 }

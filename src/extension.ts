@@ -7,6 +7,57 @@ interface ModelChoice {
     value: string;
 }
 
+function formatDryRunJsonIfAny(text: string): string {
+    const candidate = text.trim();
+    if (!candidate.startsWith('{') || !candidate.endsWith('}')) {
+        return text;
+    }
+
+    try {
+        const payload = JSON.parse(candidate) as Record<string, unknown>;
+        if (payload.dryRun !== true || typeof payload.action !== 'string') {
+            return text;
+        }
+
+        const path = typeof payload.path === 'string' ? payload.path : 'inconnu';
+        const action = String(payload.action);
+
+        if (action === 'write_file') {
+            return [
+                '[DRY-RUN] write_file',
+                `Fichier: ${path}`,
+                `Taille actuelle: ${Number(payload.existingLength ?? 0)} chars`,
+                `Nouvelle taille: ${Number(payload.newLength ?? 0)} chars`
+            ].join('\n');
+        }
+
+        if (action === 'append_file') {
+            return [
+                '[DRY-RUN] append_file',
+                `Fichier: ${path}`,
+                `Taille actuelle: ${Number(payload.existingLength ?? 0)} chars`,
+                `Taille ajoutee: ${Number(payload.appendLength ?? 0)} chars`,
+                `Taille finale estimee: ${Number(payload.resultingLength ?? 0)} chars`
+            ].join('\n');
+        }
+
+        if (action === 'replace') {
+            return [
+                '[DRY-RUN] replace',
+                `Fichier: ${path}`,
+                `Occurrences trouvees: ${Number(payload.occurrences ?? 0)}`,
+                `Remplacement effectif: ${Boolean(payload.wouldReplace) ? 'oui' : 'non'}`,
+                `Taille avant: ${Number(payload.beforeLength ?? 0)} chars`,
+                `Taille apres: ${Number(payload.afterLength ?? 0)} chars`
+            ].join('\n');
+        }
+
+        return text;
+    } catch {
+        return text;
+    }
+}
+
 async function pickProviderAndModel(): Promise<{ provider: 'moonshot' | 'openrouter'; model: string } | undefined> {
     const providerPick = await vscode.window.showQuickPick(
         [
@@ -87,7 +138,8 @@ export function activate(context: vscode.ExtensionContext) {
                 const modelLabel = reply.model ?? 'unknown-model';
                 const domainLabel = reply.domain ?? 'general';
                 const iterationLabel = reply.iterations ?? 1;
-                const metadata = `Modele: ${providerLabel} / ${modelLabel}\nSous-agent: ${domainLabel}\nIterations: ${iterationLabel}`;
+                const executionMode = reply.dryRun ? 'DRY-RUN (preview only)' : 'LIVE (writes enabled)';
+                const metadata = `Modele: ${providerLabel} / ${modelLabel}\nSous-agent: ${domainLabel}\nIterations: ${iterationLabel}\nExecution: ${executionMode}`;
 
                 if (reply.error) {
                     panel.webview.postMessage({
@@ -97,10 +149,12 @@ export function activate(context: vscode.ExtensionContext) {
                     return;
                 }
 
+                const formattedReplyText = reply.dryRun ? formatDryRunJsonIfAny(reply.text) : reply.text;
+
                 // Renvoi de la réponse à la Webview
                 panel.webview.postMessage({
                     type: "response",
-                    text: `${metadata}\n\n${reply.text}`
+                    text: `${metadata}\n\n${formattedReplyText}`
                 });
             }
         });

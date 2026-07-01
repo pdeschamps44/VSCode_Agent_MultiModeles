@@ -42,6 +42,11 @@
           "default": "moonshot",
           "description": "Provider LLM utilise par l'agent."
         },
+        "kimi.security.singleProviderStrict": {
+          "type": "boolean",
+          "default": true,
+          "description": "Si active, l'orchestrateur reste strictement sur kimi.provider sans fallback inter-provider."
+        },
         "kimi.model": {
           "type": "string",
           "default": "kimi-k2.7-code",
@@ -82,6 +87,16 @@
           "maximum": 10,
           "description": "Nombre maximal de boucles plan-action-observation pour l'orchestrateur."
         },
+        "kimi.agent.dryRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Si active, write_file/append_file/replace sont simules et n'ecrivent pas sur disque."
+        },
+        "kimi.agent.dryRunPreview": {
+          "type": "boolean",
+          "default": false,
+          "description": "(Legacy) Ancien mode de simulation. Utilisez kimi.agent.dryRun."
+        },
         "kimi.openrouter.referer": {
           "type": "string",
           "default": "http://localhost",
@@ -97,6 +112,10 @@
   },
   "scripts": {
     "compile": "webpack --mode production",
+    "build:types": "tsc -p .",
+    "test:policy": "npm run build:types && node --test test-policy.js",
+    "test:dry-run": "npm run build:types && node --test test-dry-run.js",
+    "test:all": "npm run test:policy && npm run test:dry-run",
     "watch": "webpack --watch",
     "vscode:prepublish": "npm run compile"
   },
