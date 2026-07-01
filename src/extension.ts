@@ -85,7 +85,9 @@ export function activate(context: vscode.ExtensionContext) {
 
                 const providerLabel = reply.provider ?? 'unknown-provider';
                 const modelLabel = reply.model ?? 'unknown-model';
-                const metadata = `Modele: ${providerLabel} / ${modelLabel}`;
+                const domainLabel = reply.domain ?? 'general';
+                const iterationLabel = reply.iterations ?? 1;
+                const metadata = `Modele: ${providerLabel} / ${modelLabel}\nSous-agent: ${domainLabel}\nIterations: ${iterationLabel}`;
 
                 if (reply.error) {
                     panel.webview.postMessage({

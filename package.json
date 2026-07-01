@@ -61,6 +61,27 @@
           "maximum": 32768,
           "description": "Nombre maximal de tokens de sortie."
         },
+        "kimi.request.timeoutMs": {
+          "type": "number",
+          "default": 45000,
+          "minimum": 2000,
+          "maximum": 180000,
+          "description": "Timeout reseau en millisecondes pour un appel LLM."
+        },
+        "kimi.request.retries": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 5,
+          "description": "Nombre de tentatives supplementaires en cas d'erreur transitoire."
+        },
+        "kimi.agent.maxIterations": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Nombre maximal de boucles plan-action-observation pour l'orchestrateur."
+        },
         "kimi.openrouter.referer": {
           "type": "string",
           "default": "http://localhost",

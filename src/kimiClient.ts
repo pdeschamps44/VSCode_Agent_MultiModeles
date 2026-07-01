@@ -13,6 +13,16 @@ export interface KimiResponse {
     error?: string;
     provider?: LlmProvider;
     model?: string;
+    statusCode?: number;
+}
+
+export interface LlmSendOptions {
+    provider?: LlmProvider;
+    model?: string;
+    stream?: boolean;
+    timeoutMs?: number;
+    retries?: number;
+    fallbackModels?: string[];
 }
 
 export class KimiClient {
@@ -36,6 +46,14 @@ export class KimiClient {
         return vscode.workspace.getConfiguration('kimi').get<string>('model', defaultModel);
     }
 
+    private getRequestTimeoutMs(): number {
+        return vscode.workspace.getConfiguration('kimi').get<number>('request.timeoutMs', 45000);
+    }
+
+    private getRetryCount(): number {
+        return vscode.workspace.getConfiguration('kimi').get<number>('request.retries', 1);
+    }
+
     private getTemperature(): number {
         return vscode.workspace.getConfiguration('kimi').get<number>('temperature', 0.2);
     }
@@ -52,9 +70,21 @@ export class KimiClient {
         };
     }
 
-    async sendMessages(messages: KimiMessage[], stream = false): Promise<KimiResponse> {
-        const provider = this.getProvider();
-        const model = this.getModel(provider);
+    private getDefaultFallbackModels(provider: LlmProvider, primaryModel: string): string[] {
+        const defaults = provider === 'openrouter'
+            ? ['moonshotai/kimi-k2.7-code', 'qwen/qwen-2.5-72b-instruct']
+            : ['kimi-k2.7-code'];
+
+        return defaults.filter((model) => model !== primaryModel);
+    }
+
+    private async sendOnce(
+        provider: LlmProvider,
+        model: string,
+        messages: KimiMessage[],
+        stream: boolean,
+        timeoutMs: number
+    ): Promise<KimiResponse> {
         const temperature = this.getTemperature();
         const maxTokens = this.getMaxTokens();
 
@@ -72,25 +102,29 @@ export class KimiClient {
             };
         }
 
+        const endpoint = provider === 'openrouter'
+            ? 'https://openrouter.ai/api/v1/chat/completions'
+            : 'https://api.moonshot.ai/v1/chat/completions';
+
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`
+        };
+
+        if (provider === 'openrouter') {
+            const openRouterHeaders = this.getOpenRouterHeaders();
+            headers['HTTP-Referer'] = openRouterHeaders.referer;
+            headers['X-Title'] = openRouterHeaders.title;
+        }
+
+        const abortController = new AbortController();
+        const timeoutHandle = setTimeout(() => abortController.abort(), timeoutMs);
+
         try {
-            const endpoint = provider === 'openrouter'
-                ? 'https://openrouter.ai/api/v1/chat/completions'
-                : 'https://api.moonshot.ai/v1/chat/completions';
-
-            const headers: Record<string, string> = {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${apiKey}`
-            };
-
-            if (provider === 'openrouter') {
-                const openRouterHeaders = this.getOpenRouterHeaders();
-                headers['HTTP-Referer'] = openRouterHeaders.referer;
-                headers['X-Title'] = openRouterHeaders.title;
-            }
-
             const response = await fetch(endpoint, {
-                method: "POST",
+                method: 'POST',
                 headers,
+                signal: abortController.signal,
                 body: JSON.stringify({
                     model,
                     messages,
@@ -100,61 +134,119 @@ export class KimiClient {
                 })
             });
 
-            if (response.status === 429) {
-                return {
-                    text: "",
-                    provider,
-                    model,
-                    error: "Limite de requêtes atteinte. Réessaie dans 30 à 60 secondes."
-                };
-            }
-
-            if (response.status === 401 || response.status === 403) {
+            if (!response.ok) {
+                const body = await response.text();
                 return {
                     text: '',
                     provider,
                     model,
-                    error: `Authentification refusée (${response.status}). Vérifie la clé API et le provider sélectionné.`
-                };
-            }
-
-            if (!response.ok) {
-                const body = await response.text();
-                return {
-                    text: "",
-                    provider,
-                    model,
+                    statusCode: response.status,
                     error: `Erreur API : ${response.status} ${response.statusText}${body ? ` - ${body}` : ''}`
                 };
             }
 
-            // Mode streaming
             if (stream) {
                 return {
                     text: "⚠️ Le streaming n'est pas encore activé dans cette version.",
                     provider,
-                    model
+                    model,
+                    statusCode: response.status
                 };
             }
 
-            // Mode normal
             const data: any = await response.json();
-            const text = data?.choices?.[0]?.message?.content ?? "";
+            const text = data?.choices?.[0]?.message?.content ?? '';
 
             return {
                 text,
                 provider,
-                model
+                model,
+                statusCode: response.status
             };
-
         } catch (err: any) {
+            if (err?.name === 'AbortError') {
+                return {
+                    text: '',
+                    provider,
+                    model,
+                    error: `Timeout API après ${timeoutMs} ms.`
+                };
+            }
+
             return {
-                text: "",
+                text: '',
                 provider,
                 model,
                 error: `Erreur réseau : ${err.message}`
             };
+        } finally {
+            clearTimeout(timeoutHandle);
         }
+    }
+
+    private isRetryable(response: KimiResponse): boolean {
+        if (!response.error) {
+            return false;
+        }
+
+        if (response.statusCode === 429) {
+            return true;
+        }
+
+        if (!response.statusCode) {
+            return true;
+        }
+
+        return response.statusCode >= 500;
+    }
+
+    private isFatalAuthError(response: KimiResponse): boolean {
+        return response.statusCode === 401 || response.statusCode === 403;
+    }
+
+    async sendMessages(
+        messages: KimiMessage[],
+        streamOrOptions: boolean | LlmSendOptions = false
+    ): Promise<KimiResponse> {
+        const options: LlmSendOptions = typeof streamOrOptions === 'boolean'
+            ? { stream: streamOrOptions }
+            : streamOrOptions;
+
+        const provider = options.provider ?? this.getProvider();
+        const primaryModel = options.model ?? this.getModel(provider);
+        const timeoutMs = options.timeoutMs ?? this.getRequestTimeoutMs();
+        const retries = Math.max(0, options.retries ?? this.getRetryCount());
+        const stream = options.stream ?? false;
+        const fallbackModels = options.fallbackModels ?? this.getDefaultFallbackModels(provider, primaryModel);
+        const modelCandidates = [primaryModel, ...fallbackModels.filter((m) => m !== primaryModel)];
+
+        let lastError: KimiResponse = {
+            text: '',
+            provider,
+            model: primaryModel,
+            error: 'Aucune tentative de requête n\'a été exécutée.'
+        };
+
+        for (const model of modelCandidates) {
+            for (let attempt = 0; attempt <= retries; attempt += 1) {
+                const response = await this.sendOnce(provider, model, messages, stream, timeoutMs);
+                if (!response.error) {
+                    return response;
+                }
+
+                lastError = response;
+
+                if (this.isFatalAuthError(response)) {
+                    return response;
+                }
+
+                if (!this.isRetryable(response)) {
+                    break;
+                }
+            }
+        }
+
+        return lastError;
     }
 
     /**
