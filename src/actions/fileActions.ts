@@ -4,16 +4,36 @@ import * as vscode from 'vscode';
 import { getWorkspaceRootUri, toWorkspaceRelativePath } from './projectActions';
 
 function resolveTargetUri(targetPath: string): vscode.Uri {
-	if (path.isAbsolute(targetPath)) {
-		return vscode.Uri.file(targetPath);
-	}
-
 	const root = getWorkspaceRootUri();
 	if (!root) {
 		throw new Error('Aucun dossier workspace ouvert.');
 	}
 
-	return vscode.Uri.joinPath(root, targetPath);
+	const normalizedInput = targetPath.trim();
+	if (!normalizedInput) {
+		throw new Error('Chemin de fichier vide.');
+	}
+
+	if (path.isAbsolute(normalizedInput)) {
+		throw new Error('Chemins absolus interdits. Utilisez un chemin relatif au workspace.');
+	}
+
+	if (/^[a-zA-Z]:/.test(normalizedInput)) {
+		throw new Error('Chemins de type drive letter interdits. Utilisez un chemin relatif au workspace.');
+	}
+
+	const candidateFsPath = path.resolve(root.fsPath, normalizedInput);
+	const relative = path.relative(root.fsPath, candidateFsPath);
+	const isOutsideWorkspace = relative.startsWith('..') || path.isAbsolute(relative);
+	if (isOutsideWorkspace) {
+		throw new Error('Acces refuse: chemin en dehors du workspace.');
+	}
+
+	if (!relative || relative === '.') {
+		throw new Error('Chemin de fichier invalide: la racine workspace ne peut pas etre lue/ecrite.');
+	}
+
+	return vscode.Uri.file(candidateFsPath);
 }
 
 export async function readTextFile(targetPath: string): Promise<{ path: string; content: string }> {

@@ -39,6 +39,16 @@ interface PlannerTurn {
     finalAnswer?: string;
 }
 
+const VALID_ACTION_TYPES: PlannedAction['type'][] = [
+    'read_file',
+    'write_file',
+    'append_file',
+    'search',
+    'replace',
+    'list_files',
+    'none'
+];
+
 export class Agent {
 
     private llmClient: KimiClient;
@@ -149,20 +159,138 @@ export class Agent {
     }
 
     private safeJsonParse(text: string): PlannerTurn | undefined {
-        try {
-            return JSON.parse(text) as PlannerTurn;
-        } catch {
-            const start = text.indexOf('{');
-            const end = text.lastIndexOf('}');
-            if (start >= 0 && end > start) {
-                try {
-                    return JSON.parse(text.slice(start, end + 1)) as PlannerTurn;
-                } catch {
-                    return undefined;
+        const parseAttempts: string[] = [];
+        const trimmed = text.trim();
+        if (trimmed) {
+            parseAttempts.push(trimmed);
+        }
+
+        const fencedMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
+        if (fencedMatch?.[1]) {
+            parseAttempts.push(fencedMatch[1].trim());
+        }
+
+        const balanced = this.extractFirstBalancedJsonObject(text);
+        if (balanced) {
+            parseAttempts.push(balanced);
+        }
+
+        for (const candidate of parseAttempts) {
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(candidate);
+            } catch {
+                continue;
+            }
+
+            const validation = this.validatePlannerTurn(parsed);
+            if (validation.ok) {
+                return validation.turn;
+            }
+        }
+
+        return undefined;
+    }
+
+    private extractFirstBalancedJsonObject(text: string): string | undefined {
+        let start = -1;
+        let depth = 0;
+        let inString = false;
+        let escaped = false;
+
+        for (let idx = 0; idx < text.length; idx += 1) {
+            const char = text[idx];
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (char === '\\') {
+                    escaped = true;
+                } else if (char === '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (char === '"') {
+                inString = true;
+                continue;
+            }
+
+            if (char === '{') {
+                if (depth === 0) {
+                    start = idx;
+                }
+                depth += 1;
+                continue;
+            }
+
+            if (char === '}') {
+                if (depth === 0) {
+                    continue;
+                }
+
+                depth -= 1;
+                if (depth === 0 && start >= 0) {
+                    return text.slice(start, idx + 1);
                 }
             }
-            return undefined;
         }
+
+        return undefined;
+    }
+
+    private isRecord(value: unknown): value is Record<string, unknown> {
+        return typeof value === 'object' && value !== null && !Array.isArray(value);
+    }
+
+    private validatePlannerTurn(parsed: unknown): { ok: true; turn: PlannerTurn } | { ok: false; reason: string } {
+        if (!this.isRecord(parsed)) {
+            return { ok: false, reason: 'Le planner JSON doit etre un objet.' };
+        }
+
+        const plan = parsed.plan;
+        const finalAnswer = parsed.finalAnswer;
+        const actionCandidate = parsed.action;
+
+        if (plan !== undefined && typeof plan !== 'string') {
+            return { ok: false, reason: 'Le champ plan doit etre une string.' };
+        }
+
+        if (finalAnswer !== undefined && typeof finalAnswer !== 'string') {
+            return { ok: false, reason: 'Le champ finalAnswer doit etre une string.' };
+        }
+
+        let action: PlannedAction | undefined;
+        if (actionCandidate !== undefined) {
+            if (!this.isRecord(actionCandidate)) {
+                return { ok: false, reason: 'Le champ action doit etre un objet.' };
+            }
+
+            const actionType = actionCandidate.type;
+            if (typeof actionType !== 'string' || !VALID_ACTION_TYPES.includes(actionType as PlannedAction['type'])) {
+                return { ok: false, reason: `Type d'action invalide: ${String(actionType)}.` };
+            }
+
+            const actionArgs = actionCandidate.args;
+            if (actionArgs !== undefined && !this.isRecord(actionArgs)) {
+                return { ok: false, reason: 'Le champ action.args doit etre un objet.' };
+            }
+
+            action = {
+                type: actionType as PlannedAction['type'],
+                args: actionArgs as Record<string, unknown> | undefined
+            };
+        }
+
+        return {
+            ok: true,
+            turn: {
+                plan,
+                finalAnswer,
+                action
+            }
+        };
     }
 
     private stringifyResult(payload: unknown): string {
@@ -171,6 +299,15 @@ export class Agent {
         } catch {
             return String(payload);
         }
+    }
+
+    private getRequiredStringArg(args: Record<string, unknown>, key: string): string {
+        const value = args[key];
+        if (typeof value !== 'string' || !value.trim()) {
+            throw new Error(`Argument requis invalide: ${key}`);
+        }
+
+        return value.trim();
     }
 
     private async executeAction(action: PlannedAction, allowedActions: SpecialistProfile['allowedActions']): Promise<string> {
@@ -182,39 +319,39 @@ export class Agent {
 
         switch (action.type) {
             case 'read_file': {
-                const path = String(args.path ?? '');
+                const path = this.getRequiredStringArg(args, 'path');
                 const file = await readTextFile(path);
                 return this.stringifyResult({ path: file.path, content: file.content.slice(0, 5000) });
             }
             case 'write_file': {
-                const path = String(args.path ?? '');
-                const content = String(args.content ?? '');
+                const path = this.getRequiredStringArg(args, 'path');
+                const content = this.getRequiredStringArg(args, 'content');
                 const result = await writeTextFile(path, content);
                 return this.stringifyResult(result);
             }
             case 'append_file': {
-                const path = String(args.path ?? '');
-                const content = String(args.content ?? '');
+                const path = this.getRequiredStringArg(args, 'path');
+                const content = this.getRequiredStringArg(args, 'content');
                 const result = await appendTextFile(path, content);
                 return this.stringifyResult(result);
             }
             case 'replace': {
-                const path = String(args.path ?? '');
-                const search = String(args.search ?? '');
-                const replacement = String(args.replacement ?? '');
+                const path = this.getRequiredStringArg(args, 'path');
+                const search = this.getRequiredStringArg(args, 'search');
+                const replacement = this.getRequiredStringArg(args, 'replacement');
                 const result = await replaceInFile(path, search, replacement);
                 return this.stringifyResult(result);
             }
             case 'search': {
-                const query = String(args.query ?? '');
+                const query = this.getRequiredStringArg(args, 'query');
                 const includeGlob = String(args.includeGlob ?? '**/*.{ts,tsx,js,jsx,json,md}');
-                const maxResults = Number(args.maxResults ?? 20);
+                const maxResults = Math.min(100, Math.max(1, Number(args.maxResults ?? 20)));
                 const result = await searchInWorkspace(query, includeGlob, maxResults);
                 return this.stringifyResult(result);
             }
             case 'list_files': {
                 const glob = String(args.glob ?? '**/*');
-                const maxResults = Number(args.maxResults ?? 200);
+                const maxResults = Math.min(1000, Math.max(1, Number(args.maxResults ?? 200)));
                 const files = await listProjectFiles(glob, maxResults);
                 return this.stringifyResult(files);
             }
@@ -280,14 +417,26 @@ export class Agent {
 
             const planner = this.safeJsonParse(response.text);
             if (!planner) {
-                this.logger.warn('Reponse non parseable en JSON, retour en mode direct.');
-                return {
-                    text: response.text || '⚠️ Réponse vide du modèle.',
-                    provider: response.provider,
-                    model: response.model,
-                    domain: profile.domain,
-                    iterations: iteration
-                };
+                const parseError = 'Reponse non conforme au schema JSON attendu.';
+                this.logger.warn(parseError);
+                messages.push({ role: 'assistant', content: response.text });
+
+                if (iteration >= maxIterations) {
+                    return {
+                        text: `${parseError} Boucle interrompue apres ${iteration} iterations.`,
+                        error: parseError,
+                        provider: response.provider,
+                        model: response.model,
+                        domain: profile.domain,
+                        iterations: iteration
+                    };
+                }
+
+                messages.push({
+                    role: 'user',
+                    content: 'Ta reponse n\'est pas un JSON valide au schema requis. Reponds uniquement avec un JSON strict conforme au schema fourni.'
+                });
+                continue;
             }
 
             if (planner.plan) {
@@ -298,6 +447,19 @@ export class Agent {
             if (action.type === 'none' && planner.finalAnswer?.trim()) {
                 return {
                     text: planner.finalAnswer,
+                    provider: response.provider,
+                    model: response.model,
+                    domain: profile.domain,
+                    iterations: iteration
+                };
+            }
+
+            if (action.type === 'none' && !planner.finalAnswer?.trim()) {
+                const noOpError = 'Action none sans finalAnswer valide: boucle interrompue pour eviter une no-op loop.';
+                this.logger.warn(noOpError);
+                return {
+                    text: noOpError,
+                    error: noOpError,
                     provider: response.provider,
                     model: response.model,
                     domain: profile.domain,
