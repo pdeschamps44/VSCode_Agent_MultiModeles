@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+.vscode-test/
+*.vsix
+
+# Fichiers de test locaux exclus de GitHub
+test-kimi.js
+test-openrouter-kimi.js
+test-openrouter.js

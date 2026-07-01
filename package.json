@@ -1,0 +1,95 @@
+{
+  "name": "kimi-hardware-agent",
+  "displayName": "Kimi Hardware Agent",
+  "description": "Un agent VS Code spécialisé en électronique, PCB, SPICE, firmware et analyse de signaux, basé sur Kimi 2.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kimi.openChat",
+        "title": "Kimi Hardware Agent: Ouvrir le chat"
+      },
+      {
+        "command": "kimi.setMoonshotApiKey",
+        "title": "Kimi: Configurer la clé API Moonshot"
+      },
+      {
+        "command": "kimi.setOpenRouterApiKey",
+        "title": "Kimi: Configurer la clé API OpenRouter"
+      },
+      {
+        "command": "kimi.selectProviderAndModel",
+        "title": "Kimi: Choisir provider et modèle"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Kimi Hardware Agent",
+      "properties": {
+        "kimi.provider": {
+          "type": "string",
+          "enum": [
+            "moonshot",
+            "openrouter"
+          ],
+          "default": "moonshot",
+          "description": "Provider LLM utilise par l'agent."
+        },
+        "kimi.model": {
+          "type": "string",
+          "default": "kimi-k2.7-code",
+          "description": "Nom du modele a utiliser. Ex: kimi-k2.7-code, moonshotai/kimi-k2.7-code, anthropic/claude-haiku-4.5."
+        },
+        "kimi.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Temperature de generation."
+        },
+        "kimi.maxTokens": {
+          "type": "number",
+          "default": 4096,
+          "minimum": 64,
+          "maximum": 32768,
+          "description": "Nombre maximal de tokens de sortie."
+        },
+        "kimi.openrouter.referer": {
+          "type": "string",
+          "default": "http://localhost",
+          "description": "Valeur du header HTTP-Referer pour OpenRouter."
+        },
+        "kimi.openrouter.title": {
+          "type": "string",
+          "default": "Kimi Hardware Agent",
+          "description": "Valeur du header X-Title pour OpenRouter."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "webpack --mode production",
+    "watch": "webpack --watch",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/node-fetch": "^2.6.13",
+    "@types/vscode": "^1.85.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.3.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0",
+    "openai": "^6.45.0"
+  }
+}

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <title>Kimi Hardware Agent</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #1e1e1e;
+            color: #ddd;
+        }
+
+        #container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        #messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+        }
+
+        .msg {
+            margin-bottom: 12px;
+            padding: 10px;
+            border-radius: 6px;
+            max-width: 80%;
+            white-space: pre-wrap;
+        }
+
+        .user {
+            background: #0e639c;
+            align-self: flex-end;
+        }
+
+        .kimi {
+            background: #333;
+            align-self: flex-start;
+        }
+
+        .error {
+            background: #8b0000;
+            align-self: flex-start;
+        }
+
+        #inputBar {
+            display: flex;
+            padding: 10px;
+            background: #252526;
+        }
+
+        #input {
+            flex: 1;
+            padding: 8px;
+            border-radius: 4px;
+            border: none;
+            background: #3c3c3c;
+            color: #fff;
+        }
+
+        #sendBtn {
+            margin-left: 10px;
+            padding: 8px 16px;
+            background: #0e639c;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+        }
+
+        #thinking {
+            font-style: italic;
+            opacity: 0.7;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container">
+        <div id="messages"></div>
+
+        <div id="inputBar">
+            <input id="input" type="text" placeholder="Écris un message…" />
+            <button id="sendBtn">Envoyer</button>
+        </div>
+    </div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+
+        const messagesDiv = document.getElementById("messages");
+        const input = document.getElementById("input");
+        const sendBtn = document.getElementById("sendBtn");
+
+        function addMessage(text, cssClass) {
+            const div = document.createElement("div");
+            div.className = "msg " + cssClass;
+            div.textContent = text;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        sendBtn.addEventListener("click", () => {
+            const text = input.value.trim();
+            if (!text) return;
+
+            addMessage(text, "user");
+            vscode.postMessage({ type: "userMessage", text });
+
+            input.value = "";
+        });
+
+        window.addEventListener("message", (event) => {
+            const msg = event.data;
+
+            if (msg.type === "thinking") {
+                addMessage("Kimi réfléchit…", "kimi");
+                return;
+            }
+
+            if (msg.type === "response") {
+                addMessage(msg.text, "kimi");
+                return;
+            }
+
+            if (msg.type === "error") {
+                addMessage("Erreur : " + msg.text, "error");
+                return;
+            }
+        });
+    </script>
+</body>
+</html>
