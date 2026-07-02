@@ -137,12 +137,28 @@ function resolveTargetUri(targetPath: string): vscode.Uri {
 	return vscode.Uri.file(candidateFsPath);
 }
 
-export async function readTextFile(targetPath: string): Promise<{ path: string; content: string }> {
+export async function readTextFile(
+	targetPath: string,
+	offsetCharOrLine?: number,
+	limitChars?: number
+): Promise<{ path: string; content: string }> {
 	const uri = resolveTargetUri(targetPath);
 	const data = await vscode.workspace.fs.readFile(uri);
+	let content = Buffer.from(data).toString('utf8');
+
+	// Si offset est fourni, découper le contenu
+	if (offsetCharOrLine !== undefined && offsetCharOrLine > 0) {
+		content = content.slice(offsetCharOrLine);
+	}
+
+	// Si limit est fourni, limiter la longueur
+	if (limitChars !== undefined && limitChars > 0) {
+		content = content.slice(0, limitChars);
+	}
+
 	return {
 		path: toWorkspaceRelativePath(uri),
-		content: Buffer.from(data).toString('utf8')
+		content
 	};
 }
 

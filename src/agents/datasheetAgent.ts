@@ -5,7 +5,7 @@ export const datasheetAgentProfile: SpecialistProfile = {
 	name: 'Datasheet Reviewer',
 	preferredTask: 'analysis',
 	keywords: ['datasheet', 'absolute maximum', 'recommended operating', 'thermal', 'pinout', 'spec'],
-	allowedActions: ['read_file', 'search', 'list_files', 'none'],
+	allowedActions: ['read_file', 'write_file', 'append_file', 'replace', 'search', 'list_files', 'none'],
 	systemPrompt: [
 		'Tu es un expert lecture de datasheets.',
 		'Tu identifies les limites critiques, marges, et conditions de test.',

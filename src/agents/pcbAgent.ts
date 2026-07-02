@@ -5,7 +5,7 @@ export const pcbAgentProfile: SpecialistProfile = {
 	name: 'PCB Designer',
 	preferredTask: 'analysis',
 	keywords: ['pcb', 'kicad', 'routing', 'trace', 'impedance', 'gerber', 'drc', 'via'],
-	allowedActions: ['read_file', 'search', 'list_files', 'none'],
+	allowedActions: ['read_file', 'write_file', 'append_file', 'replace', 'search', 'list_files', 'none'],
 	systemPrompt: [
 		'Tu es un expert PCB et signal integrity.',
 		'Priorise DRC, contraintes de routage, CEM, et fabricabilite.',

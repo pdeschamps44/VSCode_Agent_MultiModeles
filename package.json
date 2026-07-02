@@ -6,6 +6,13 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:kimi.openChat",
+    "onCommand:kimi.setMoonshotApiKey",
+    "onCommand:kimi.setOpenRouterApiKey",
+    "onCommand:kimi.selectProviderAndModel"
+  ],
   "categories": [
     "Other"
   ],
@@ -68,10 +75,10 @@
         },
         "kimi.request.timeoutMs": {
           "type": "number",
-          "default": 45000,
+          "default": 120000,
           "minimum": 2000,
           "maximum": 180000,
-          "description": "Timeout reseau en millisecondes pour un appel LLM."
+          "description": "Timeout reseau en millisecondes pour un appel LLM. Augmentez pour les gros rapports/code (ex: 120000 = 2 min)."
         },
         "kimi.request.retries": {
           "type": "number",
@@ -82,10 +89,10 @@
         },
         "kimi.agent.maxIterations": {
           "type": "number",
-          "default": 4,
+          "default": 100,
           "minimum": 1,
-          "maximum": 10,
-          "description": "Nombre maximal de boucles plan-action-observation pour l'orchestrateur."
+          "maximum": 100,
+          "description": "Nombre maximal de boucles plan-action-observation pour l'orchestrateur. Augmentez pour les gros projets (>50 fichiers)."
         },
         "kimi.agent.dryRun": {
           "type": "boolean",

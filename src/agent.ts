@@ -183,7 +183,7 @@ export class Agent {
                 provider: candidate.provider,
                 model: candidate.model,
                 retries: 1,
-                timeoutMs: vscode.workspace.getConfiguration('kimi').get<number>('request.timeoutMs', 45000),
+                timeoutMs: vscode.workspace.getConfiguration('kimi').get<number>('request.timeoutMs', 120000),
                 fallbackModels: []
             });
 
@@ -364,8 +364,11 @@ export class Agent {
         switch (action.type) {
             case 'read_file': {
                 const path = this.getRequiredStringArg(args, 'path');
-                const file = await readTextFile(path);
-                return this.stringifyResult({ path: file.path, content: file.content.slice(0, 5000) });
+                const offset = Number(args.offset ?? 0);
+                const limit = Number(args.limit ?? 15000);
+                
+                const file = await readTextFile(path, offset > 0 ? offset : undefined, limit > 0 ? limit : undefined);
+                return this.stringifyResult({ path: file.path, content: file.content });
             }
             case 'write_file': {
                 const path = this.getRequiredStringArg(args, 'path');
@@ -475,9 +478,29 @@ export class Agent {
                     `Tu agis comme sous-agent specialise: ${profile.name}.`,
                     profile.systemPrompt,
                     `Actions autorisees: ${profile.allowedActions.join(', ')}.`,
+                    '',
+                    '🎯 PRIORITES:',
+                    '1. LIMITE les list_files/read_file a des patterns specifiques (ex: "*.pcb", "*.sch", dossier "firmware/") - NE lis pas recursif tout le projet.',
+                    '2. ANALYSE d\'abord (read, search) avant toute ECRITURE (write_file, append_file, replace).',
+                    '3. Chaque iteration: une action ciblée max. Pas de list_files suivi immediatement d\'une autre list_files.',
+                    `4. ${maxIterations > 15 ? 'Tu as suffisamment d\'iterations pour une analyse approfondie: sois methodique.' : 'Tu as peu d\'iterations: sois tres selectif et cible les fichiers cles.'}`,
+                    '',
+                    '⚠️ ACCES AUX FICHIERS:',
+                    '- ❌ Tu n\'as AUCUN acces a un terminal ou des commandes shell. Les appels shell seront bloques.',
+                    '- ✅ Tu dois OBLIGATOIREMENT utiliser l\'action read_file pour explorer les fichiers.',
+                    '- ✅ Pour les fichiers volumineux, utilise les parametres offset et limit:',
+                    '  Exemple: {"type":"read_file","args":{"path":"models.py","offset":5000,"limit":10000}}',
+                    '  Cela lira 10000 caracteres a partir du caractere 5000. Augmente offset pour explorer suite.',
+                    '',
+                    '⚠️ REGLES STRICTES SUR LES ECRITURES:',
+                    '- Tu ne dois JAMAIS affirmer qu\'un fichier a ete "cree", "modifie", "genere" ou "ecrit" sans avoir EXPLICITEMENT execute write_file/append_file/replace.',
+                    '- Avant de conclure (action.type="none"), tu DOIS avoir execute toutes les ecritures necessaires et recu leurs observations.',
+                    '- La sequence OBLIGATOIRE est: PLAN → ACTION (write_file) → OBSERVATION (confirmation d\'ecriture) → CONCLUSION dans finalAnswer.',
+                    '- Si tu n\'as pas execute l\'action, tu dois le faire a l\'iteration suivante. Ne simule JAMAIS une action.',
+                    '',
                     'Reponds STRICTEMENT en JSON avec ce schema:',
-                    '{"plan":"string","action":{"type":"read_file|write_file|append_file|search|replace|list_files|none","args":{}},"finalAnswer":"string"}',
-                    'Si tu n\'as plus besoin d\'action, mets action.type="none" et remplis finalAnswer.'
+                    '{"plan":"string (justifie ta strategie)","action":{"type":"read_file|write_file|append_file|search|replace|list_files|none","args":{}},"finalAnswer":"string"}',
+                    'Si tu n\'as plus besoin d\'action (toutes les ecritures sont CONFIRMEES), mets action.type="none" et remplis finalAnswer avec tes conclusions.'
                 ].join('\n')
             },
             {
@@ -530,7 +553,7 @@ export class Agent {
 
                 messages.push({
                     role: 'user',
-                    content: 'Ta reponse n\'est pas un JSON valide au schema requis. Reponds uniquement avec un JSON strict conforme au schema fourni.'
+                    content: 'ERREUR: Ta reponse n\'est pas un JSON strict conforme au schema. Assure-toi que:\n1. Ton reponse commence par { et finit par }\n2. Les champs plan, action, finalAnswer sont tous presents\n3. action.type est l\'une de: read_file|write_file|append_file|search|replace|list_files|none\n4. Tu reponds UNIQUEMENT avec du JSON, rien d\'autre.\nReponds maintenant uniquement avec du JSON strict.'
                 });
                 continue;
             }

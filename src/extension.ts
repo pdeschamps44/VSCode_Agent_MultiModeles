@@ -119,7 +119,15 @@ export function activate(context: vscode.ExtensionContext) {
     // 🧠 Création de l'agent central
     const agent = new Agent(context);
 
-    // 🟦 Commande : Ouvrir le chat Kimi
+    // � Log d'activation
+    const config = vscode.workspace.getConfiguration('kimi');
+    const provider = config.get<string>('provider', 'moonshot');
+    const model = config.get<string>('model', 'kimi-k2.7-code');
+    
+    // Note: Les logs du logger de l'agent s'affichent automatiquement dans le canal "Kimi Hardware Agent"
+    console.log(`[Kimi Hardware Agent] Activé avec provider=${provider}, model=${model}`);
+
+    // �🟦 Commande : Ouvrir le chat Kimi
     const openChat = vscode.commands.registerCommand('kimi.openChat', () => {
 
         // Création du panneau Webview

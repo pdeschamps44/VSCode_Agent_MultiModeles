@@ -5,7 +5,7 @@ export const hardwareAgentProfile: SpecialistProfile = {
 	name: 'Hardware Architect',
 	preferredTask: 'analysis',
 	keywords: ['hardware', 'schematic', 'composant', 'component', 'alim', 'power', 'bom', 'datasheet'],
-	allowedActions: ['read_file', 'search', 'list_files', 'none'],
+	allowedActions: ['read_file', 'write_file', 'append_file', 'replace', 'search', 'list_files', 'none'],
 	systemPrompt: [
 		'Tu es un expert hardware.',
 		'Priorise la fiabilite, la securite electrique, et la robustesse des choix de composants.',

@@ -47,7 +47,7 @@ export class KimiClient {
     }
 
     private getRequestTimeoutMs(): number {
-        return vscode.workspace.getConfiguration('kimi').get<number>('request.timeoutMs', 45000);
+        return vscode.workspace.getConfiguration('kimi').get<number>('request.timeoutMs', 120000);
     }
 
     private getRetryCount(): number {
@@ -55,6 +55,14 @@ export class KimiClient {
     }
 
     private getTemperature(): number {
+        // Les modèles Kimi K2 (moonshot/kimi-k2-7-code) n'acceptent que temperature=1
+        const provider = this.getProvider();
+        const model = this.getModel(provider);
+        
+        if (model.toLowerCase().includes('kimi-k2') || model.toLowerCase().includes('moonshot')) {
+            return 1;
+        }
+        
         return vscode.workspace.getConfiguration('kimi').get<number>('temperature', 0.2);
     }
 

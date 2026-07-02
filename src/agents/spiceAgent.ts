@@ -5,7 +5,7 @@ export const spiceAgentProfile: SpecialistProfile = {
 	name: 'SPICE Analyst',
 	preferredTask: 'analysis',
 	keywords: ['spice', 'ltspice', 'ngspice', 'netlist', 'transient', 'ac analysis', 'dc sweep'],
-	allowedActions: ['read_file', 'search', 'list_files', 'none'],
+	allowedActions: ['read_file', 'write_file', 'append_file', 'replace', 'search', 'list_files', 'none'],
 	systemPrompt: [
 		'Tu es un expert simulation SPICE.',
 		'Justifie chaque hypothese de modele et chaque parametre de simulation.',
